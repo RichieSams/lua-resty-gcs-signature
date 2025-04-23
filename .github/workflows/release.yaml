@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
       # Fix for issue brought up here: https://github.com/actions/checkout/issues/1169
       - name: Git config workaround
-        run: git config --global --add safe.directory /__w/lua-resty-aws-signature/lua-resty-aws-signature
+        run: git config --global --add safe.directory /__w/lua-resty-gcs-signature/lua-resty-gcs-signature
       - name: Setup SVU
         id: svu
         uses: obfu5c8/action-svu@v1.0.0
@@ -47,4 +47,4 @@ jobs:
           tag: ${{ steps.svu.outputs.version }}
           name: Release ${{ steps.svu.outputs.version }}
           body: ${{ steps.git-cliff.outputs.content }}
-          artifacts: lua-resty-aws-signature-${{ steps.svu.outputs.version }}.tar.gz
+          artifacts: lua-resty-gcs-signature-${{ steps.svu.outputs.version }}.tar.gz
