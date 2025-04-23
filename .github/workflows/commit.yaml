@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
       # Fix for issue brought up here: https://github.com/actions/checkout/issues/1169
       - name: Git config workaround
-        run: git config --global --add safe.directory /__w/lua-resty-aws-signature/lua-resty-aws-signature
+        run: git config --global --add safe.directory /__w/lua-resty-gcs-signature/lua-resty-gcs-signature
       - name: Setup SVU
         id: svu
         uses: obfu5c8/action-svu@v1.0.0
@@ -32,8 +32,8 @@ jobs:
       - name: Capture tar
         uses: actions/upload-artifact@v4
         with:
-          name: lua-resty-aws-signature-${{ steps.svu.outputs.version }}.tar.gz
-          path: lua-resty-aws-signature-${{ steps.svu.outputs.version }}.tar.gz
+          name: lua-resty-gcs-signature-${{ steps.svu.outputs.version }}.tar.gz
+          path: lua-resty-gcs-signature-${{ steps.svu.outputs.version }}.tar.gz
   test:
     name: Test
     runs-on: ubuntu-22.04
