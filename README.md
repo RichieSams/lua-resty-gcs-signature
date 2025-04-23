@@ -1,26 +1,19 @@
 # lua-resty-aws-signature
 
-This library is an evolution of the work done by [JobTeaser](https://github.com/jobteaser/lua-resty-aws-signature) and in turn [Alan Grosskurth](https://github.com/grosskur/lua-resty-aws). It's a fork of their work with additional improvements added on top. Specifically, it adds the ability to sign requests for custom S3 implementations like MinIO or Ceph RGW. And it adds a new method for signing requests with `UNSIGNED-PAYLOAD`.
+This library is a fork of the [lua-resty-aws-signature](https://github.com/jobteaser/lua-resty-aws-signature). It adapts the code and methods for use with Google Storage Buckets
 
 ## Overview
 
-This library implements request signing using the [AWS Signature
-Version 4](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html) specification. This signature scheme is used by nearly all AWS
-services and has been adopted as the signature scheme for many other non-AWS services, like [MinIO](https://min.io/docs/minio/linux/administration/identity-access-management.html) or [Ceph RGW](https://docs.ceph.com/en/reef/radosgw/s3/authentication/)
-
-## AWS documentation
-
-http://docs.aws.amazon.com/general/latest/gr/signature-version-4.html
-
-https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html
+This library implements request signing using the [Google Signature
+Version 4](https://cloud.google.com/storage/docs/access-control/signed-urls) specification. This signature scheme is used for GCS access.
 
 ## Usage
 
-This library uses standard AWS environment variables as credentials to generate signed request headers.
+This library uses GCS environment variables as credentials to generate signed request headers.
 
 ```bash
-export AWS_ACCESS_KEY_ID=AKIDEXAMPLE
-export AWS_SECRET_ACCESS_KEY=AKIDEXAMPLE
+export GCS_ACCESS_KEY=AKIDEXAMPLE
+export GCS_SECRET_KEY=AKIDEXAMPLE
 ```
 
 To be accessible in your nginx configuration, these variables should be declared in your `nginx.conf` file. Example:
@@ -30,8 +23,8 @@ worker_processes  1;
 
 error_log  /dev/fd/1 debug;
 
-env AWS_ACCESS_KEY_ID;
-env AWS_SECRET_ACCESS_KEY;
+env GCS_ACCESS_KEY;
+env GCS_SECRET_KEY;
 
 events {
     worker_connections  1024;
@@ -47,12 +40,12 @@ http {
 }
 ```
 
-You can then use the library to calculate the AWS Signature headers and `proxy_pass` to a given AWS service. In this example, we do a request to AWS S3.
+You can then use the library to calculate the GCS Signature headers and `proxy_pass` to GCS.
 
-NOTE: aws_signed_headers*() returns a table of headers you should apply to the request. It does *not* set them for you. This allows you to use the same function when doing LUA-only HTTP calls with something like [ledgetech/lua-resty-http](https://github.com/ledgetech/lua-resty-http).
+NOTE: gcs_signed_headers*() returns a table of headers you should apply to the request. It does *not* set them for you. This allows you to use the same function when doing LUA-only HTTP calls with something like [ledgetech/lua-resty-http](https://github.com/ledgetech/lua-resty-http).
 
 ```nginx
-set $s3_host my_bucket.s3-eu-west-1.amazonaws.com;
+set $s3_host my_bucket.storage.googleapis.com;
 set $region us-west-1;
 set $service s3
 
@@ -60,7 +53,7 @@ location / {
   access_by_lua_block {
     local aws = require('resty.aws-signature')
 
-    local headers = aws.aws_signed_headers(ngx.var.s3_host, ngx.var.uri, ngx.var.region, ngx.var.service, ngx.var.request_body)
+    local headers = aws.gcs_signed_headers(ngx.var.s3_host, ngx.var.uri, ngx.var.region, ngx.var.service, ngx.var.request_body)
     for k, v in pairs(h) do
       ngx.req.set_header(k, v)
     end

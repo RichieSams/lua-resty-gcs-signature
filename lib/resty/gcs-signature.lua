@@ -28,11 +28,11 @@ local _M = {}
 
 ---@alias Credentials {access_key:string, secret_key:string}
 
----Fetches the AWS credentials from ENV variables and returns them in a table
+---Fetches the GCS credentials from ENV variables and returns them in a table
 ---@return Credentials
 local function get_credentials()
-  local access_key = os.getenv('AWS_ACCESS_KEY_ID')
-  local secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+  local access_key = os.getenv('GCS_ACCESS_KEY')
+  local secret_key = os.getenv('GCS_SECRET_KEY')
 
   return {
     access_key = access_key,
@@ -57,47 +57,41 @@ end
 ---Calculates and returns the Derived Signing Key
 ---@param  keys      Credentials Credentials returned from get_credentials()
 ---@param  timestamp integer     The time as a Unix timestamp
----@param  region    string      The AWS region the request will use
----@param  service   string      The AWS service the request will use
 ---@return           string
-local function get_derived_signing_key(keys, timestamp, region, service)
-  local h_date = resty_hmac:new('AWS4' .. keys['secret_key'], resty_hmac.ALGOS.SHA256)
+local function get_derived_signing_key(keys, timestamp)
+  local h_date = resty_hmac:new('GOOG4' .. keys['secret_key'], resty_hmac.ALGOS.SHA256)
   h_date:update(get_iso8601_basic_short(timestamp))
   local k_date = h_date:final()
 
   local h_region = resty_hmac:new(k_date, resty_hmac.ALGOS.SHA256)
-  h_region:update(region)
+  h_region:update('auto')
   local k_region = h_region:final()
 
   local h_service = resty_hmac:new(k_region, resty_hmac.ALGOS.SHA256)
-  h_service:update(service)
+  h_service:update('storage')
   local k_service = h_service:final()
 
   local h = resty_hmac:new(k_service, resty_hmac.ALGOS.SHA256)
-  h:update('aws4_request')
+  h:update('goog4_request')
   return h:final()
 end
 
 ---Calculates and returns the credential scope
 ---
----See: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#create-string-to-sign
 ---@param  timestamp integer The time as a Unix timestamp
----@param  region    string  The AWS region the request will use
----@param  service   string  The AWS service the request will use
 ---@return           string
-local function get_cred_scope(timestamp, region, service)
+local function get_cred_scope(timestamp)
   return get_iso8601_basic_short(timestamp)
-      .. '/' .. region
-      .. '/' .. service
-      .. '/aws4_request'
+      .. '/auto'
+      .. '/storage'
+      .. '/goog4_request'
 end
 
 ---Returns the list of headers that we are signing, concatenated with semicolons
 ---
----See: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#create-canonical-request
 ---@return string
 local function get_signed_headers()
-  return 'host;x-amz-content-sha256;x-amz-date'
+  return 'host;x-goog-content-sha256;x-goog-date'
 end
 
 ---Returns The SHA256 hex-encoded digest of the request body of the input
@@ -111,7 +105,6 @@ end
 
 ---Calculates the SHA256 hashed canonical request.
 ---
----See: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#create-canonical-request
 ---@param  timestamp   integer The current time in Unix Epoch seconds
 ---@param  host        string  The upstream host
 ---@param  uri         string  The path portion of the request URI
@@ -122,8 +115,8 @@ local function get_hashed_canonical_request(timestamp, host, uri, body_digest)
       .. uri .. '\n'
       .. '\n'
       .. 'host:' .. host .. '\n'
-      .. 'x-amz-content-sha256:' .. body_digest .. '\n'
-      .. 'x-amz-date:' .. get_iso8601_basic(timestamp) .. '\n'
+      .. 'x-goog-content-sha256:' .. body_digest .. '\n'
+      .. 'x-goog-date:' .. get_iso8601_basic(timestamp) .. '\n'
       .. '\n'
       .. get_signed_headers() .. '\n'
       .. body_digest
@@ -132,24 +125,20 @@ end
 
 ---Calculates and returns the "string to sign"
 ---
----See: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#create-string-to-sign
 ---@param  timestamp   integer The current time in Unix Epoch seconds
----@param  region      string  The AWS region the request will use
----@param  service     string  The AWS service the request will use
 ---@param  host        string  The upstream host
 ---@param  uri         string  The path portion of the request URI
 ---@param  body_digest string  The SHA256 hex-encoded digest of the request body
 ---@return             string
-local function get_string_to_sign(timestamp, region, service, host, uri, body_digest)
-  return 'AWS4-HMAC-SHA256\n'
+local function get_string_to_sign(timestamp, host, uri, body_digest)
+  return 'GOOG4-HMAC-SHA256\n'
       .. get_iso8601_basic(timestamp) .. '\n'
-      .. get_cred_scope(timestamp, region, service) .. '\n'
+      .. get_cred_scope(timestamp) .. '\n'
       .. get_hashed_canonical_request(timestamp, host, uri, body_digest)
 end
 
 ---Signs the given string using the given key with the HMAC SHA256 algorithm
 ---
----See: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#calculate-signature
 ---@param derived_signing_key string The signing key
 ---@param string_to_sign      string The string to sign
 ---@return                    string
@@ -161,20 +150,17 @@ end
 
 ---Calculates and returns the appropriate value for the Authorization header
 ---
----See: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html#add-signature-to-request
 ---@param  keys        Credentials Credentials returned from get_credentials()
 ---@param  timestamp   integer     The current time in Unix Epoch seconds
----@param  region      string      The AWS region the request will use
----@param  service     string      The AWS service the request will use
 ---@param  host        string      The upstream host
 ---@param  uri         string      The path portion of the request URI
 ---@param  body_digest string      The SHA256 hex-encoded digest of the request body
 ---@return             string
-local function get_authorization(keys, timestamp, region, service, host, uri, body_digest)
-  local derived_signing_key = get_derived_signing_key(keys, timestamp, region, service)
-  local string_to_sign = get_string_to_sign(timestamp, region, service, host, uri, body_digest)
-  local auth = 'AWS4-HMAC-SHA256 '
-      .. 'Credential=' .. keys['access_key'] .. '/' .. get_cred_scope(timestamp, region, service)
+local function get_authorization(keys, timestamp, host, uri, body_digest)
+  local derived_signing_key = get_derived_signing_key(keys, timestamp)
+  local string_to_sign = get_string_to_sign(timestamp, host, uri, body_digest)
+  local auth = 'GOOG4-HMAC-SHA256 '
+      .. 'Credential=' .. keys['access_key'] .. '/' .. get_cred_scope(timestamp)
       .. ',SignedHeaders=' .. get_signed_headers()
       .. ',Signature=' .. get_signature(derived_signing_key, string_to_sign)
   return auth
@@ -185,93 +171,87 @@ end
 --- Exported module functions
 ---------------------------------
 
----Calculates and returns a table of request headers for an authenticated AWS request
+---Calculates and returns a table of request headers for an authenticated GCS request
 ---
 ---This function takes as an argument the request body so that it can hash it to include in
 ---the authentication signature. If you want to avoid this overhead, you can use
----aws_signed_headers_unsigned_payload()
+---gcs_signed_headers_unsigned_payload()
 ---
----Note: This function requires the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment
+---Note: This function requires the GCS_ACCESS_KEY and GCS_SECRET_KEY environment
 ---      variables to be set. You must expose them to LUA in your nginx.conf using:
 ---
 --- ```
---- env AWS_ACCESS_KEY_ID;
---- env AWS_SECRET_ACCESS_KEY;
+--- env GCS_ACCESS_KEY;
+--- env GCS_SECRET_KEY;
 --- ```
 ---
----See: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
+---See: https://cloud.google.com/storage/docs/access-control/signed-urls
 ---@param  host    string  The upstream host
 ---@param  uri     string  The path portion of the request URI
----@param  region  string  The AWS region the request will use
----@param  service string  The AWS service the request will use
 ---@param  body    string  The request body
 ---@return         table   # The table of headers to apply to your request
-function _M.aws_signed_headers(host, uri, region, service, body)
+function _M.gcs_signed_headers(host, uri, body)
   local body_digest = get_sha256_digest(body)
   local timestamp = tonumber(ngx.time())
 
-  return _M.aws_signed_headers_detailed(host, uri, region, service, body_digest, timestamp)
+  return _M.gcs_signed_headers_detailed(host, uri, body_digest, timestamp)
 end
 
----Calculates and returns a table of request headers for an authenticated AWS request
+---Calculates and returns a table of request headers for an authenticated GCS request
 ---
 ---This function will skip the request body digest calculation. Which saves the cost and
 ---time of hashing the entire request body. If you do want the request body digest
----to be part of the signature though, you can use aws_signed_headers() instead
+---to be part of the signature though, you can use gcs_signed_headers() instead
 ---
----Note: This function requires the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment
+---Note: This function requires the GCS_ACCESS_KEY and GCS_SECRET_KEY environment
 ---      variables to be set. You must expose them to LUA in your nginx.conf using:
 ---
 --- ```
---- env AWS_ACCESS_KEY_ID;
---- env AWS_SECRET_ACCESS_KEY;
+--- env GCS_ACCESS_KEY;
+--- env GCS_SECRET_KEY;
 --- ```
 ---
----See: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
+---See: https://cloud.google.com/storage/docs/access-control/signed-urls
 ---@param  host    string  The upstream host
 ---@param  uri     string  The path portion of the request URI
----@param  region  string  The AWS region the request will use
----@param  service string  The AWS service the request will use
 ---@return         table   # The table of headers to apply to your request
-function _M.aws_signed_headers_unsigned_payload(host, uri, region, service)
+function _M.gcs_signed_headers_unsigned_payload(host, uri, region, service)
   local body_digest = 'UNSIGNED-PAYLOAD'
   local timestamp = tonumber(ngx.time())
 
-  return _M.aws_signed_headers_detailed(host, uri, region, service, body_digest, timestamp)
+  return _M.gcs_signed_headers_detailed(host, uri, body_digest, timestamp)
 end
 
----Calculates and returns a table of request headers for an authenticated AWS request
+---Calculates and returns a table of request headers for an authenticated GCS request
 ---
----This function is identical to aws_signed_headers(), but it allows you to set the body_digest
+---This function is identical to gcs_signed_headers(), but it allows you to set the body_digest
 ---and timestamp yourself. Unless you are doing something very special, you should generally
----just use aws_signed_headers() or aws_signed_headers_unsigned_payload()
+---just use gcs_signed_headers() or gcs_signed_headers_unsigned_payload()
 ---
----Note: This function requires the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment
+---Note: This function requires the GCS_ACCESS_KEY and GCS_SECRET_KEY environment
 ---      variables to be set. You must expose them to LUA in your nginx.conf using:
 ---
 --- ```
---- env AWS_ACCESS_KEY_ID;
---- env AWS_SECRET_ACCESS_KEY;
+--- env GCS_ACCESS_KEY;
+--- env GCS_SECRET_KEY;
 --- ```
 ---
----See: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
+---See: https://cloud.google.com/storage/docs/access-control/signed-urls
 ---@param  host        string  The upstream host
 ---@param  uri         string  The path portion of the request URI
----@param  region      string  The AWS region the request will use
----@param  service     string  The AWS service the request will use
 ---@param  body_digest string  The SHA256 hex-encoded digest of the request body
 ---@param  timestamp   integer The current time as a Unix timestamp
 ---@return            table    # The table of headers to apply to your request
-function _M.aws_signed_headers_detailed(host, uri, region, service, body_digest, timestamp)
+function _M.gcs_signed_headers_detailed(host, uri, body_digest, timestamp)
   local creds = get_credentials()
 
-  local auth = get_authorization(creds, timestamp, region, service, host, uri, body_digest)
+  local auth = get_authorization(creds, timestamp, host, uri, body_digest)
 
   return {
     ["Authorization"] = auth,
     ["Host"] = host,
-    ["x-amz-date"] = get_iso8601_basic(timestamp),
-    ["x-amz-content-sha256"] = body_digest,
+    ["x-goog-date"] = get_iso8601_basic(timestamp),
+    ["x-goog-content-sha256"] = body_digest,
   }
 end
 
