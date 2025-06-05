@@ -15,7 +15,7 @@ env GCS_SECRET_KEY=YYYYY;
             local gcs = require('resty.gcs-signature')
 
             -- Calculate the headers and stuff them into the response
-            h = gcs.gcs_signed_headers_detailed('example.com', '/foo/bar', 'UNSIGNED-PAYLOAD', 1732156539)
+            h = gcs.gcs_signed_headers_detailed('GET', 'example.com', '/foo/bar', 'UNSIGNED-PAYLOAD', 1732156539)
             for k, v in pairs(h) do
                 ngx.header[k] = v
             end
@@ -47,7 +47,7 @@ env GCS_SECRET_KEY=YYYYY;
             local gcs = require('resty.gcs-signature')
 
             -- Calculate the headers and stuff them into the response
-            h = gcs.gcs_signed_headers_detailed('example.com', '/foo/bar', 'b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c', 1732156539)
+            h = gcs.gcs_signed_headers_detailed('GET', 'example.com', '/foo/bar', 'b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c', 1732156539)
             for k, v in pairs(h) do
                 ngx.header[k] = v
             end
@@ -66,3 +66,67 @@ Authorization: GOOG4-HMAC-SHA256 Credential=XXXXX/20241121/auto/storage/goog4_re
 Host: example.com
 x-goog-date: 20241121T023539Z
 x-goog-content-sha256: b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
+
+
+=== Test HEAD:
+--- main_config
+env GCS_ACCESS_KEY=XXXXX;
+env GCS_SECRET_KEY=YYYYY;
+
+--- config
+    location = /t {
+        content_by_lua_block {
+            local gcs = require('resty.gcs-signature')
+
+            -- Calculate the headers and stuff them into the response
+            h = gcs.gcs_signed_headers_detailed('HEAD', 'example.com', '/foo/bar', 'UNSIGNED-PAYLOAD', 1732156539)
+            for k, v in pairs(h) do
+                ngx.header[k] = v
+            end
+
+            ngx.print('ok')
+        }
+    }
+--- request
+HEAD /t
+--- response_body chomp
+
+--- no_error_log
+[error]
+--- response_headers
+Authorization: GOOG4-HMAC-SHA256 Credential=XXXXX/20241121/auto/storage/goog4_request,SignedHeaders=host;x-goog-content-sha256;x-goog-date,Signature=ab329edb315bae1e3a49b733c0eeeaa7ba8d8bb584e83af0f174cfa8bc9d4296
+Host: example.com
+x-goog-date: 20241121T023539Z
+x-goog-content-sha256: UNSIGNED-PAYLOAD
+
+
+=== Test HEAD overridden to a GET for signature (proxy_cache_convert_head):
+--- main_config
+env GCS_ACCESS_KEY=XXXXX;
+env GCS_SECRET_KEY=YYYYY;
+
+--- config
+    location = /t {
+        content_by_lua_block {
+            local gcs = require('resty.gcs-signature')
+
+            -- Calculate the headers and stuff them into the response
+            h = gcs.gcs_signed_headers_detailed('GET', 'example.com', '/foo/bar', 'UNSIGNED-PAYLOAD', 1732156539)
+            for k, v in pairs(h) do
+                ngx.header[k] = v
+            end
+
+            ngx.print('ok')
+        }
+    }
+--- request
+HEAD /t
+--- response_body chomp
+
+--- no_error_log
+[error]
+--- response_headers
+Authorization: GOOG4-HMAC-SHA256 Credential=XXXXX/20241121/auto/storage/goog4_request,SignedHeaders=host;x-goog-content-sha256;x-goog-date,Signature=528346f587a0b46433f92d583f3148b88a5117bf26131f328553789feb433028
+Host: example.com
+x-goog-date: 20241121T023539Z
+x-goog-content-sha256: UNSIGNED-PAYLOAD

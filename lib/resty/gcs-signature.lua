@@ -106,12 +106,13 @@ end
 ---Calculates the SHA256 hashed canonical request.
 ---
 ---@param  timestamp   integer The current time in Unix Epoch seconds
+---@param  method      string  The request method
 ---@param  host        string  The upstream host
 ---@param  uri         string  The path portion of the request URI
 ---@param  body_digest string  The SHA256 hex-encoded digest of the request body
 ---@return             string
-local function get_hashed_canonical_request(timestamp, host, uri, body_digest)
-  local canonical_request = ngx.var.request_method .. '\n'
+local function get_hashed_canonical_request(timestamp, method, host, uri, body_digest)
+  local canonical_request = method .. '\n'
       .. uri .. '\n'
       .. '\n'
       .. 'host:' .. host .. '\n'
@@ -126,15 +127,16 @@ end
 ---Calculates and returns the "string to sign"
 ---
 ---@param  timestamp   integer The current time in Unix Epoch seconds
+---@param  method      string  The request method
 ---@param  host        string  The upstream host
 ---@param  uri         string  The path portion of the request URI
 ---@param  body_digest string  The SHA256 hex-encoded digest of the request body
 ---@return             string
-local function get_string_to_sign(timestamp, host, uri, body_digest)
+local function get_string_to_sign(timestamp, method, host, uri, body_digest)
   return 'GOOG4-HMAC-SHA256\n'
       .. get_iso8601_basic(timestamp) .. '\n'
       .. get_cred_scope(timestamp) .. '\n'
-      .. get_hashed_canonical_request(timestamp, host, uri, body_digest)
+      .. get_hashed_canonical_request(timestamp, method, host, uri, body_digest)
 end
 
 ---Signs the given string using the given key with the HMAC SHA256 algorithm
@@ -152,13 +154,14 @@ end
 ---
 ---@param  keys        Credentials Credentials returned from get_credentials()
 ---@param  timestamp   integer     The current time in Unix Epoch seconds
+---@param  method      string      The request method
 ---@param  host        string      The upstream host
 ---@param  uri         string      The path portion of the request URI
 ---@param  body_digest string      The SHA256 hex-encoded digest of the request body
 ---@return             string
-local function get_authorization(keys, timestamp, host, uri, body_digest)
+local function get_authorization(keys, timestamp, method, host, uri, body_digest)
   local derived_signing_key = get_derived_signing_key(keys, timestamp)
-  local string_to_sign = get_string_to_sign(timestamp, host, uri, body_digest)
+  local string_to_sign = get_string_to_sign(timestamp, method, host, uri, body_digest)
   local auth = 'GOOG4-HMAC-SHA256 '
       .. 'Credential=' .. keys['access_key'] .. '/' .. get_cred_scope(timestamp)
       .. ',SignedHeaders=' .. get_signed_headers()
@@ -191,10 +194,11 @@ end
 ---@param  body    string  The request body
 ---@return         table   # The table of headers to apply to your request
 function _M.gcs_signed_headers(host, uri, body)
+  local method = ngx.var.request_method
   local body_digest = get_sha256_digest(body)
   local timestamp = tonumber(ngx.time())
 
-  return _M.gcs_signed_headers_detailed(host, uri, body_digest, timestamp)
+  return _M.gcs_signed_headers_detailed(method, host, uri, body_digest, timestamp)
 end
 
 ---Calculates and returns a table of request headers for an authenticated GCS request
@@ -216,10 +220,11 @@ end
 ---@param  uri     string  The path portion of the request URI
 ---@return         table   # The table of headers to apply to your request
 function _M.gcs_signed_headers_unsigned_payload(host, uri, region, service)
+  local method = ngx.var.request_method
   local body_digest = 'UNSIGNED-PAYLOAD'
   local timestamp = tonumber(ngx.time())
 
-  return _M.gcs_signed_headers_detailed(host, uri, body_digest, timestamp)
+  return _M.gcs_signed_headers_detailed(method, host, uri, body_digest, timestamp)
 end
 
 ---Calculates and returns a table of request headers for an authenticated GCS request
@@ -237,15 +242,16 @@ end
 --- ```
 ---
 ---See: https://cloud.google.com/storage/docs/access-control/signed-urls
+---@param  method      string  The request method
 ---@param  host        string  The upstream host
 ---@param  uri         string  The path portion of the request URI
 ---@param  body_digest string  The SHA256 hex-encoded digest of the request body
 ---@param  timestamp   integer The current time as a Unix timestamp
 ---@return            table    # The table of headers to apply to your request
-function _M.gcs_signed_headers_detailed(host, uri, body_digest, timestamp)
+function _M.gcs_signed_headers_detailed(method, host, uri, body_digest, timestamp)
   local creds = get_credentials()
 
-  local auth = get_authorization(creds, timestamp, host, uri, body_digest)
+  local auth = get_authorization(creds, timestamp, method, host, uri, body_digest)
 
   return {
     ["Authorization"] = auth,
